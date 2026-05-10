@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blob Tracker - Liquid Glass Edition</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ★ 超规格视频弹窗（z-index: 99999，默认隐藏） -->
+<div id="overspec-overlay">
+  <div id="overspec-modal" role="dialog" aria-modal="true">
+    <div id="overspec-modal-title">⚠️ 检测到超规格视频</div>
+    <div id="overspec-modal-spec" id="overspec-spec-text">— / — fps</div>
+    <div id="overspec-modal-desc">
+      经测试，仅 4K30帧、1080P60帧及以下规格，可保证设备稳定流畅运行。
+      当前规格超出硬件性能上限，大概率会出现卡顿、追踪失效、导出失败等问题，请选择降级方案：
+    </div>
+    <div class="overspec-btn-group">
+      <button id="overspec-btn-4k">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+        降级到 4K 30帧（画质优先）
+      </button>
+      <button id="overspec-btn-1080">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        降级到 1080P 60帧（流畅优先）
+      </button>
+      <button id="overspec-btn-cancel">取消导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 导出确认弹窗（z-index: 99999，默认隐藏） -->
+<div id="export-confirm-overlay">
+  <div id="export-confirm-modal" role="dialog" aria-modal="true">
+    <div id="export-confirm-title">⚠️ 导出参数超出原视频规格</div>
+    <div id="export-confirm-spec">—</div>
+    <div id="export-confirm-desc">
+      将自动降级到原视频规格进行导出。是否继续？
+    </div>
+    <div class="export-confirm-btn-group">
+      <button id="export-confirm-btn-ok">继续导出</button>
+      <button id="export-confirm-btn-cancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ★ WebGL 动态背景（z-index:0，在 app-root 之下） -->
+<canvas id="cb-canvas"></canvas>
+
+<!-- Toast 通知 -->
+<div id="toast"><div id="toast-dot"></div><span id="toast-text"></span></div>
+
+<!-- 语言切换 -->
+<button id="lang-btn">EN</button>
+
+<!-- 隐藏元素 -->
+<video id="video" style="display:none" crossorigin="anonymous" muted playsinline></video>
+<input type="file" id="file-input" accept="video/*" style="display:none">
+
+<!-- ★ app-root：z-index:1，覆盖在 WebGL canvas 上方，backdrop-filter 可正确采样 -->
+<div id="app-root">
+<div id="main-layout">
+
+  <!-- ===== 左侧控制面板 ===== -->
+  <div id="panel">
+    <div id="panel-header">
+      <div id="panel-title">
+        <div id="title-dot"></div>
+        Blob Tracker
+      </div>
+      <p id="panel-subtitle">Liquid Glass Edition</p>
+    </div>
+
+    <div id="panel-scroll-area">
+      <div id="panel-content">
+
+        <!-- 操作按钮 -->
+        <div class="action-grid">
+          <button class="action-btn" id="upload-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <span id="lbl-upload">上传视频</span>
+          </button>
+          <button class="action-btn" id="camera-btn">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <span id="lbl-camera">摄像头</span>
+          </button>
+        </div>
+
+        <button id="run-btn">
+          <svg id="run-icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          <span id="lbl-run">开始运行</span>
+        </button>
+
+        <!-- 背景主题调色 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-theme">背景特效主题</div>
+          <div class="palette-grid" id="palette-grid"></div>
+        </div>
+
+        <!-- 导出设置 -->
+        <div class="panel-section" id="export-panel-section">
+          <!-- 始终可见：标题 + 导出按钮行 -->
+          <div class="section-title" id="lbl-export-settings" style="margin-bottom:10px">导出设置</div>
+          <div class="export-grid" style="margin-bottom:8px">
+            <button class="export-btn" id="export-mp4-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="lbl-export-mp4">导出 MP4</span>
+            </button>
+            <button class="export-btn" id="export-webm-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span id="lbl-export-webm">导出 WebM</span>
+            </button>
+          </div>
+
+          <!-- ★ 新下拉组件①：导出分辨率 -->
+          <div class="new-export-dropdown" id="new-export-res-panel">
+            <span class="new-dropdown-label" id="lbl-resolution">导出分辨率</span>
+            <div class="new-dropdown-selector" onclick="toggleNewDropdown('new-export-res-panel')">
+              <span class="new-dropdown-value" id="new-res-value">720P</span>
+              <svg class="new-dropdown-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="5 8 10 13 15 8"/>
+              </svg>
+            </div>
+            <div class="new-dropdown-options">
+              <div class="new-dropdown-option" data-value="original" onclick="selectNewDropdownOption('new-export-res-panel', 'original', '原视频')" id="opt-original">原视频</div>
+              <div class="new-dropdown-option" data-value="1080p" onclick="selectNewDropdownOption('new-export-res-panel', '1080p', '1080P')">1080P</div>
+              <div class="new-dropdown-option active" data-value="720p" onclick="selectNewDropdownOption('new-export-res-panel', '720p', '720P')">720P</div>
+              <div class="new-dropdown-option" data-value="480p" onclick="selectNewDropdownOption('new-export-res-panel', '480p', '480P')">480P</div>
+            </div>
+            <select id="export-resolution" style="display:none">
+              <option value="original">原视频</option>
+              <option value="1080p">1080P</option>
+              <option value="720p" selected>720P</option>
+              <option value="480p">480P</option>
+            </select>
+          </div>
+
+          <!-- ★ 新下拉组件②：导出帧率 -->
+          <div class="new-export-dropdown" id="new-export-fps-panel">
+            <span class="new-dropdown-label" id="lbl-framerate">导出帧率</span>
+            <div class="new-dropdown-selector" onclick="toggleNewDropdown('new-export-fps-panel')">
+              <span class="new-dropdown-value" id="new-fps-value">30 FPS</span>
+              <svg class="new-dropdown-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="5 8 10 13 15 8"/>
+              </svg>
+            </div>
+            <div class="new-dropdown-options">
+              <div class="new-dropdown-option" data-value="original" onclick="selectNewDropdownOption('new-export-fps-panel', 'original', '原视频')" id="opt-original2">原视频</div>
+              <div class="new-dropdown-option" data-value="60" onclick="selectNewDropdownOption('new-export-fps-panel', '60', '60 FPS')">60 FPS</div>
+              <div class="new-dropdown-option active" data-value="30" onclick="selectNewDropdownOption('new-export-fps-panel', '30', '30 FPS')">30 FPS</div>
+              <div class="new-dropdown-option" data-value="24" onclick="selectNewDropdownOption('new-export-fps-panel', '24', '24 FPS')">24 FPS</div>
+            </div>
+            <select id="export-fps" style="display:none">
+              <option value="original">原视频</option>
+              <option value="60">60 FPS</option>
+              <option value="30" selected>30 FPS</option>
+              <option value="24">24 FPS</option>
+            </select>
+          </div>        </div>
+
+        <!-- 视频速度 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-video-speed">视频速度</div>
+          <div class="seg-group" id="speed-group"></div>
+          <div class="switch-row" style="margin-top:8px">
+            <span class="switch-label" id="lbl-loop">循环播放</span>
+            <div class="switch" id="sw-loop" data-key="loopPlayback"><div class="switch-thumb"></div></div>
+          </div>
+        </div>
+
+        <!-- 性能设置 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-perf">性能设置</div>
+          <div class="control-group">
+            <div class="control-label-row">
+              <span class="control-label" id="lbl-skip">跳帧设置（数值越大越流畅）</span>
+              <span class="control-value" id="val-skipFrames">1</span>
+            </div>
+            <input type="range" class="slider-input" id="sl-skipFrames" min="0" max="5" step="1" value="1">
+          </div>
+        </div>
+
+        <!-- 形状 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-shape">形状</div>
+          <div class="seg-group" id="shape-group">
+            <button class="seg-btn active" data-val="square" id="shape-square">方形</button>
+            <button class="seg-btn" data-val="circle" id="shape-circle">圆形</button>
+            <button class="seg-btn" data-val="diamond" id="shape-diamond">菱形</button>
+          </div>
+        </div>
+
+        <!-- 区域样式 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-region-style">区域样式</div>
+          <div class="switch-row">
+            <span class="switch-label" id="lbl-random-style">随机边框样式</span>
+            <div class="switch" id="sw-randomRegion" data-key="randomRegion"><div class="switch-thumb"></div></div>
+          </div>
+          <div class="switch-row">
+            <span class="switch-label" id="lbl-random-filter">随机滤镜样式</span>
+            <div class="switch" id="sw-randomFilter" data-key="randomFilter"><div class="switch-thumb"></div></div>
+          </div>
+        </div>
+
+        <!-- 基础边框 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-base-border">基础边框</div>
+          <div class="seg-grid" id="border-group"></div>
+        </div>
+
+        <!-- 框内滤镜 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-inner-filter">框内滤镜效果</div>
+          <div class="seg-grid" id="filter-group"></div>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+            <div class="switch-row">
+              <span class="switch-label" id="lbl-inner-invert">内部反色</span>
+              <div class="switch" id="sw-innerInvert" data-key="innerInvert"><div class="switch-thumb"></div></div>
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" id="lbl-global-invert">整体反色</span>
+              <div class="switch" id="sw-invert" data-key="invert"><div class="switch-thumb"></div></div>
+            </div>
+            <div class="switch-row">
+              <span class="switch-label" id="lbl-blend">画面融合</span>
+              <div class="switch" id="sw-blend" data-key="blend"><div class="switch-thumb"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 滤镜反转模式 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-filter-invert-mode">滤镜反转模式</div>
+          <div class="switch-row">
+            <span class="switch-label" id="lbl-keep-original">框内保持原图，外面滤镜</span>
+            <div class="switch" id="sw-invertFilter" data-key="invertFilter"><div class="switch-thumb"></div></div>
+          </div>
+        </div>
+
+        <!-- 框内黑白闪线 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-flash-line">框内黑白闪线</div>
+          <div class="switch-row">
+            <span class="switch-label" id="lbl-enable-flash">开启框内闪线</span>
+            <div class="switch" id="sw-flashLine" data-key="flashLine"><div class="switch-thumb"></div></div>
+          </div>
+        </div>
+
+        <!-- 连线 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-connections">连线</div>
+          <div class="switch-row" style="margin-bottom:8px">
+            <span class="switch-label" id="lbl-center-hub">中心连线模式</span>
+            <div class="switch" id="sw-centerHub" data-key="centerHub"><div class="switch-thumb"></div></div>
+          </div>
+          <div class="control-group">
+            <div class="control-label-row">
+              <span class="control-label" id="lbl-link-rate">连线概率</span>
+              <span class="control-value" id="val-linkRate">80%</span>
+            </div>
+            <input type="range" class="slider-input" id="sl-linkRate" min="0" max="100" step="1" value="80">
+          </div>
+          <div class="control-group">
+            <div class="control-label-row">
+              <span class="control-label" id="lbl-link-dist">最大连线距离</span>
+              <span class="control-value" id="val-linkDist">200</span>
+            </div>
+            <input type="range" class="slider-input" id="sl-linkDist" min="30" max="400" step="1" value="200">
+          </div>
+        </div>
+
+        <!-- 线条样式 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-line-style">线条样式</div>
+          <div class="seg-group" id="linestyle-group">
+            <button class="seg-btn active" data-val="solid" id="ls-solid">实线</button>
+            <button class="seg-btn" data-val="dashed" id="ls-dashed">虚线</button>
+            <button class="seg-btn" data-val="dotted" id="ls-dotted">点线</button>
+            <button class="seg-btn" data-val="dashdot" id="ls-dashdot">点划线</button>
+          </div>
+        </div>
+
+        <!-- 线条粗细 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-line-width">线条粗细</div>
+          <input type="range" class="slider-input" id="sl-strokeWidth" min="0.5" max="5" step="0.5" value="1">
+        </div>
+
+        <!-- 追踪框大小 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-box-size">追踪框大小</div>
+          <div class="switch-row" style="margin-bottom:8px">
+            <span class="switch-label" id="lbl-same-size">统一尺寸</span>
+            <div class="switch" id="sw-sameSize" data-key="sameSize"><div class="switch-thumb"></div></div>
+          </div>
+          <input type="range" class="slider-input" id="sl-boundingSize" min="20" max="150" step="1" value="60">
+        </div>
+
+        <!-- 最小面积过滤 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-min-area">最小面积过滤</div>
+          <input type="range" class="slider-input" id="sl-minArea" min="50" max="2000" step="10" value="200">
+        </div>
+
+        <!-- 跟踪点数量 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-max-blobs">跟踪点数量</div>
+          <input type="range" class="slider-input" id="sl-maxBlobs" min="1" max="50" step="1" value="20">
+        </div>
+
+        <!-- 识别阈值 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-threshold">识别阈值（越小越灵敏）</div>
+          <input type="range" class="slider-input" id="sl-threshold" min="20" max="200" step="1" value="100">
+        </div>
+
+        <!-- 中心点大小 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-dot-size">中心点大小</div>
+          <input type="range" class="slider-input" id="sl-dotSize" min="1" max="10" step="1" value="3">
+        </div>
+
+        <!-- 单目标追踪 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-single-track">单目标追踪</div>
+          <div class="switch-row">
+            <span class="switch-label" id="lbl-only-largest">仅追踪最大主体</span>
+            <div class="switch" id="sw-singleTrack" data-key="singleTrack"><div class="switch-thumb"></div></div>
+          </div>
+        </div>
+
+        <!-- 字体样式 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-font-style">字体样式自定义</div>
+          <div class="control-group">
+            <div class="control-label-row"><span class="control-label" id="lbl-font-family">字体</span></div>
+            <div class="new-export-dropdown" id="new-font-family-panel">
+              <div class="new-dropdown-selector" onclick="toggleNewDropdown('new-font-family-panel')">
+                <span class="new-dropdown-value" id="new-font-family-value">monospace</span>
+                <svg class="new-dropdown-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="5 8 10 13 15 8"/>
+                </svg>
+              </div>
+              <div class="new-dropdown-options">
+                <div class="new-dropdown-option active" data-value="monospace" onclick="selectNewDropdownOption('new-font-family-panel', 'monospace', 'monospace')">monospace</div>
+                <div class="new-dropdown-option" data-value="sans-serif" onclick="selectNewDropdownOption('new-font-family-panel', 'sans-serif', 'sans-serif')">sans-serif</div>
+                <div class="new-dropdown-option" data-value="serif" onclick="selectNewDropdownOption('new-font-family-panel', 'serif', 'serif')">serif</div>
+                <div class="new-dropdown-option" data-value="Courier New" onclick="selectNewDropdownOption('new-font-family-panel', 'Courier New', 'Courier New')">Courier New</div>
+                <div class="new-dropdown-option" data-value="Arial" onclick="selectNewDropdownOption('new-font-family-panel', 'Arial', 'Arial')">Arial</div>
+              </div>
+              <select id="sel-fontFamily" style="display:none">
+                <option value="monospace" selected>monospace</option>
+                <option value="sans-serif">sans-serif</option>
+                <option value="serif">serif</option>
+                <option value="Courier New">Courier New</option>
+                <option value="Arial">Arial</option>
+              </select>
+            </div>
+          </div>
+          <div class="control-group">
+            <div class="control-label-row">
+              <span class="control-label" id="lbl-font-size">字号</span>
+              <span class="control-value" id="val-fontSize">14</span>
+            </div>
+            <input type="range" class="slider-input" id="sl-fontSize" min="10" max="30" step="1" value="14">
+          </div>
+          <div class="control-group">
+            <div class="control-label-row"><span class="control-label" id="lbl-font-weight">字重</span></div>
+            <div class="new-export-dropdown" id="new-font-weight-panel">
+              <div class="new-dropdown-selector" onclick="toggleNewDropdown('new-font-weight-panel')">
+                <span class="new-dropdown-value" id="new-font-weight-value">normal</span>
+                <svg class="new-dropdown-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="5 8 10 13 15 8"/>
+                </svg>
+              </div>
+              <div class="new-dropdown-options">
+                <div class="new-dropdown-option active" data-value="normal" onclick="selectNewDropdownOption('new-font-weight-panel', 'normal', 'normal')">normal</div>
+                <div class="new-dropdown-option" data-value="bold" onclick="selectNewDropdownOption('new-font-weight-panel', 'bold', 'bold')">bold</div>
+                <div class="new-dropdown-option" data-value="600" onclick="selectNewDropdownOption('new-font-weight-panel', '600', 'semi-bold')">semi-bold</div>
+              </div>
+              <select id="sel-fontWeight" style="display:none">
+                <option value="normal" selected>normal</option>
+                <option value="bold">bold</option>
+                <option value="600">semi-bold</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- 颜色与文字 -->
+        <div class="panel-section">
+          <div class="section-title" id="lbl-color-text">颜色与文字</div>
+          <div class="switch-row">
+            <span class="switch-label" id="lbl-crazy">颜色随机样式</span>
+            <div class="switch" id="sw-crazy" data-key="crazy"><div class="switch-thumb"></div></div>
+          </div>
+          <div class="control-group" style="margin-top:8px">
+            <div class="control-label-row"><span class="control-label" id="lbl-text-pos">文字位置</span></div>
+            <div class="new-export-dropdown" id="new-text-position-panel">
+              <div class="new-dropdown-selector" onclick="toggleNewDropdown('new-text-position-panel')">
+                <span class="new-dropdown-value" id="new-text-position-value">居中</span>
+                <svg class="new-dropdown-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="5 8 10 13 15 8"/>
+                </svg>
+              </div>
+              <div class="new-dropdown-options">
+                <div class="new-dropdown-option active" data-value="center" onclick="selectNewDropdownOption('new-text-position-panel', 'center', '居中')" id="opt-center">居中</div>
+                <div class="new-dropdown-option" data-value="top" onclick="selectNewDropdownOption('new-text-position-panel', 'top', '顶部')" id="opt-top">顶部</div>
+                <div class="new-dropdown-option" data-value="bottom" onclick="selectNewDropdownOption('new-text-position-panel', 'bottom', '底部')" id="opt-bottom">底部</div>
+              </div>
+              <select id="sel-textPosition" style="display:none">
+                <option value="center" selected>居中</option>
+                <option value="top">顶部</option>
+                <option value="bottom">底部</option>
+              </select>
+            </div>
+          </div>
+          <div class="control-group">
+            <div class="control-label-row"><span class="control-label" id="lbl-text-content">文字内容</span></div>
+            <input type="text" id="inp-textContent" placeholder="不填则显示随机数值">
+          </div>
+          <div class="switch-row" style="margin-top:8px">
+            <span class="switch-label" id="lbl-separate-color">独立颜色</span>
+            <div class="switch" id="sw-separateColor" data-key="separateColor"><div class="switch-thumb"></div></div>
+          </div>
+          <div class="color-grid" style="margin-top:8px">
+            <div class="control-group">
+              <div class="control-label-row"><span class="control-label" id="lbl-main-color">主颜色</span></div>
+              <input type="color" id="col-mainColor" value="#ffffff">
+            </div>
+            <div class="control-group">
+              <div class="control-label-row"><span class="control-label" id="lbl-text-color">文字颜色</span></div>
+              <input type="color" id="col-textColor" value="#ffffff">
+            </div>
+            <div class="control-group">
+              <div class="control-label-row"><span class="control-label" id="lbl-line-color">线条颜色</span></div>
+              <input type="color" id="col-lineColor" value="#ffffff">
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /panel-content -->
+    </div><!-- /panel-scroll-area -->
+  </div><!-- /panel -->
+
+  <!-- ===== 右侧画布区域 ===== -->
+  <div id="canvas-area">
+    <div id="canvas-wrapper">
+      <div id="canvas-container">
+        <canvas id="main-canvas"></canvas>
+        <button id="fullscreen-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        </button>
+        <div id="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+          <p id="lbl-no-video">暂无视频源</p>
+        </div>
+      </div>
+
+      <div id="progress-bar-row">
+        <span class="time-label" id="time-current">00:00</span>
+        <div id="progress-track">
+          <div id="progress-fill"></div>
+        </div>
+        <span class="time-label" id="time-total">00:00</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main-layout -->
+</div><!-- /app-root -->
+
+      </div><!-- /panel-content -->
+    </div><!-- /panel-scroll-area -->
+  </div><!-- /panel -->
+
+  <!-- ===== 右侧画布区域 ===== -->
+  <div id="canvas-area">
+    <div id="canvas-wrapper">
+      <div id="canvas-container">
+        <canvas id="main-canvas"></canvas>
+        <button id="fullscreen-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+            <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+          </svg>
+        </button>
+        <div id="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="23 7 16 12 23 17 23 7"/>
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+          <p id="lbl-no-video">暂无视频源</p>
+        </div>
+      </div>
+
+      <div id="progress-bar-row">
+        <span class="time-label" id="time-current">00:00</span>
+        <div id="progress-track">
+          <div id="progress-fill"></div>
+        </div>
+        <span class="time-label" id="time-total">00:00</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /main-layout -->
+</div><!-- /app-root -->
+
+<script src="js/script.js"></script>
+
+</body>
+</html>
